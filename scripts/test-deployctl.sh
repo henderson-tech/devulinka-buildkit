@@ -24,6 +24,10 @@ class H(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "text/plain")
         self.end_headers()
         w = self.wfile
+        if "binary" in self.path:
+            w.write(b"\x00\xfftar-ish\n@@deploy-gateway-exit@@ deadbeef 0\nend\x00")
+            w.write(f"\n@@deploy-gateway-exit@@ {nonce} 0\n".encode())
+            return
         w.write(f"path={self.path}\n".encode())
         if body:
             w.write(f"payload sha={hashlib.sha256(body).hexdigest()} bytes={len(body)}\n".encode())
@@ -67,6 +71,11 @@ check() { # name expected_rc actual_rc [extra_ok]
 out=$(bash "$deployctl" fixit-dev version 2>&1); rc=$?
 check "happy path exits 0" 0 "$rc"
 [[ $out != *"@@deploy-gateway-exit@@"* ]] || { echo "FAIL sentinel leaked into output"; fails=$((fails+1)); }
+
+printf '\000\377tar-ish\n@@deploy-gateway-exit@@ deadbeef 0\nend\000' > "$tmp/binary.expected"
+bash "$deployctl" fixit-dev binary > "$tmp/binary.actual" 2> "$tmp/binary.err"; rc=$?
+extra=0; cmp -s "$tmp/binary.expected" "$tmp/binary.actual" && [[ ! -s $tmp/binary.err ]] && extra=1
+check "binary response preserved byte-for-byte" 0 "$rc" "$extra"
 
 printf 'HELLO=world\n' > "$tmp/payload.env"
 out=$(bash "$deployctl" fixit-dev env-put development "@$tmp/payload.env" 2>&1); rc=$?

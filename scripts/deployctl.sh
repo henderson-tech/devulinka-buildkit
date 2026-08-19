@@ -93,30 +93,43 @@ nonce=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')
 curl_args+=(-H "X-Exit-Nonce: $nonce")
 
 url="${gateway}/v1/deploy/${target}/${verb}${query:+?${query}}"
-code_file=$(mktemp)
-trap 'rm -f "$code_file"' EXIT
+response_file=$(mktemp)
+trailer_file=$(mktemp)
+trap 'rm -f "$response_file" "$trailer_file"' EXIT
 
 set +e
-deploy_gateway_curl "${curl_args[@]}" "$url" | awk -v out="$code_file" -v sentinel="$sentinel" -v nonce="$nonce" '
-  # Every nonce-bearing status line is consumed (never leaked as output);
-  # only a numeric 0-255 code counts as a verdict — anything else leaves
-  # code empty and the client exits 70 (unknown state).
-  $1 == sentinel && $2 == nonce {
-    if (NF == 3 && $3 ~ /^[0-9]+$/ && $3 + 0 <= 255) code = $3
-    next
-  }
-  { print; fflush() }
-  END { if (code == "") exit 3; print code > out }
-'
-pipe_status=("${PIPESTATUS[@]}")
+deploy_gateway_curl "${curl_args[@]}" "$url" > "$response_file"
+curl_status=$?
 set -e
 
-if (( pipe_status[0] != 0 )); then
-  echo "deployctl: gateway request failed (curl exit ${pipe_status[0]})" >&2
+if (( curl_status != 0 )); then
+  echo "deployctl: gateway request failed (curl exit ${curl_status})" >&2
   exit 70
 fi
-if (( pipe_status[1] != 0 )); then
+
+# The gateway's authenticated verdict is an exact final frame:
+#   \n@@deploy-gateway-exit@@ <nonce> <code>\n
+# Parse and remove only that suffix. A line-oriented filter (awk/sed) is not
+# binary-safe: it rewrites record separators and corrupted streamed tar files.
+status_line=$(tail -n 1 "$response_file")
+read -r got_sentinel got_nonce code extra <<< "$status_line"
+if [[ $got_sentinel != "$sentinel" || $got_nonce != "$nonce" || -n ${extra:-} \
+      || ! $code =~ ^[0-9]+$ || $code -gt 255 ]]; then
   echo "deployctl: gateway response ended without an authenticated exit status — deploy state UNKNOWN, do not retry blindly" >&2
   exit 70
 fi
-exit "$(cat "$code_file")"
+
+printf '\n%s\n' "$status_line" > "$trailer_file"
+response_bytes=$(wc -c < "$response_file" | tr -d '[:space:]')
+trailer_bytes=$(wc -c < "$trailer_file" | tr -d '[:space:]')
+if (( response_bytes < trailer_bytes )) \
+    || ! tail -c "$trailer_bytes" "$response_file" | cmp -s - "$trailer_file"; then
+  echo "deployctl: malformed authenticated exit frame — deploy state UNKNOWN, do not retry blindly" >&2
+  exit 70
+fi
+
+body_bytes=$((response_bytes - trailer_bytes))
+if (( body_bytes > 0 )); then
+  head -c "$body_bytes" "$response_file"
+fi
+exit "$code"

@@ -174,6 +174,9 @@ extra=0; [[ $out == *"still busy"* && $out == *"nothing ran"* ]] && extra=1
 check "HTTP 429 past the retry budget exits 75, nothing ran" 75 "$rc" "$extra"
 unset DEPLOYCTL_RETRY_FIRST_DELAY_SECONDS
 
+DEPLOYCTL_RETRY_FIRST_DELAY_SECONDS=0 bash "$deployctl" fixit-dev version >/dev/null 2>&1; rc=$?
+check "zero retry delay rejected (no busy loop)" 2 "$rc"
+
 out=$(ACTIONS_ID_TOKEN_REQUEST_URL="http://127.0.0.1:$port/token?api-version=2.0" ACTIONS_ID_TOKEN_REQUEST_TOKEN=reqtok \
   bash "$deployctl" fixit-dev whoauth 2>&1); rc=$?
 extra=0; [[ $out == *"auth=Bearer aaa.bbb.ccc"* ]] && extra=1

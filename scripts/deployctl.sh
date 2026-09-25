@@ -161,7 +161,7 @@ mint_oidc_header() {
   [[ $ACTIONS_ID_TOKEN_REQUEST_URL != *\?* ]] || sep='&'
   if ! json=$(command curl -sS --fail --max-time 20 \
       -H @<(printf 'Authorization: bearer %s\n' "$ACTIONS_ID_TOKEN_REQUEST_TOKEN") \
-      "${ACTIONS_ID_TOKEN_REQUEST_URL}${sep}audience=${oidc_audience}"); then
+      "${ACTIONS_ID_TOKEN_REQUEST_URL}${sep}audience=$(urlencode "$oidc_audience")"); then
     echo "deployctl: could not mint a GitHub OIDC token — calling the gateway without one" >&2
     return 0
   fi
@@ -179,6 +179,11 @@ mint_oidc_header() {
 # Backoff doubles from the first delay up to 60 s, within the retry budget.
 retry_budget=${DEPLOYCTL_RETRY_BUDGET_SECONDS:-600}
 delay=${DEPLOYCTL_RETRY_FIRST_DELAY_SECONDS:-5}
+# A zero or non-numeric delay would retry a busy gateway forever: refuse it.
+[[ $retry_budget =~ ^[0-9]{1,5}$ && $delay =~ ^[1-9][0-9]{0,3}$ ]] || {
+  echo "deployctl: DEPLOYCTL_RETRY_BUDGET_SECONDS must be 0-99999 and DEPLOYCTL_RETRY_FIRST_DELAY_SECONDS 1-9999" >&2
+  exit 2
+}
 waited=0
 while :; do
   mint_oidc_header

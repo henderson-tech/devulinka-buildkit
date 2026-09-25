@@ -145,17 +145,65 @@ curl_args+=(-H "X-Exit-Nonce: $nonce")
 url="${gateway}/v1/deploy/${target}/${verb}${query:+?${query}}"
 response_file=$(mktemp)
 trailer_file=$(mktemp)
-trap 'rm -f "$response_file" "$trailer_file"; cleanup_token' EXIT
+oidc_header_file=''
+trap 'rm -f "$response_file" "$trailer_file" ${oidc_header_file:+"$oidc_header_file"}; cleanup_token' EXIT
 
-set +e
-deploy_gateway_curl "${curl_args[@]}" "$url" > "$response_file"
-curl_status=$?
-set -e
+# GitHub Actions OIDC (vt-1491): a job with `permissions: id-token: write` proves
+# its environment, ref and workflow to targets that bind them. Without that
+# permission no header is sent: an observe-mode target still deploys, an
+# enforcing one refuses. The token travels in a 0600 header file, never argv.
+oidc_audience=${DEPLOY_GATEWAY_OIDC_AUDIENCE:-deploy-gateway}
+mint_oidc_header() {
+  rm -f ${oidc_header_file:+"$oidc_header_file"}
+  oidc_header_file=''
+  [[ -n ${ACTIONS_ID_TOKEN_REQUEST_URL:-} && -n ${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-} ]] || return 0
+  local sep='?' json token
+  [[ $ACTIONS_ID_TOKEN_REQUEST_URL != *\?* ]] || sep='&'
+  if ! json=$(command curl -sS --fail --max-time 20 \
+      -H @<(printf 'Authorization: bearer %s\n' "$ACTIONS_ID_TOKEN_REQUEST_TOKEN") \
+      "${ACTIONS_ID_TOKEN_REQUEST_URL}${sep}audience=${oidc_audience}"); then
+    echo "deployctl: could not mint a GitHub OIDC token — calling the gateway without one" >&2
+    return 0
+  fi
+  token=$(printf '%s' "$json" | sed -nE 's/.*"value"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p')
+  if [[ ! $token =~ ^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$ ]]; then
+    echo "deployctl: GitHub OIDC response carried no token — calling the gateway without one" >&2
+    return 0
+  fi
+  oidc_header_file=$(umask 077 && mktemp)
+  printf 'Authorization: Bearer %s\n' "$token" > "$oidc_header_file"
+}
 
-if (( curl_status != 0 )); then
-  echo "deployctl: gateway request failed (curl exit ${curl_status})" >&2
-  exit 70
-fi
+# HTTP 429 is the gateway's admission refusal (target busy or at capacity): it
+# is sent BEFORE anything executes, so it is the one response safe to retry.
+# Backoff doubles from the first delay up to 60 s, within the retry budget.
+retry_budget=${DEPLOYCTL_RETRY_BUDGET_SECONDS:-600}
+delay=${DEPLOYCTL_RETRY_FIRST_DELAY_SECONDS:-5}
+waited=0
+while :; do
+  mint_oidc_header
+  attempt_args=("${curl_args[@]}")
+  [[ -z $oidc_header_file ]] || attempt_args+=(-H "@$oidc_header_file")
+  set +e
+  http_code=$(deploy_gateway_curl "${attempt_args[@]}" -o "$response_file" -w '%{http_code}' "$url")
+  curl_status=$?
+  set -e
+
+  if (( curl_status != 0 )); then
+    echo "deployctl: gateway request failed (curl exit ${curl_status})" >&2
+    exit 70
+  fi
+  [[ $http_code == 429 ]] || break
+  if (( waited + delay > retry_budget )); then
+    echo "deployctl: gateway still busy after ${waited}s (HTTP 429) — nothing ran on ${target}; retry later" >&2
+    head -c 512 "$response_file" >&2
+    exit 75
+  fi
+  echo "deployctl: gateway busy (HTTP 429) — nothing ran; retrying ${verb} in ${delay}s: $(head -c 200 "$response_file" | tr '\n' ' ')" >&2
+  sleep "$delay"
+  waited=$((waited + delay))
+  delay=$((delay * 2 > 60 ? 60 : delay * 2))
+done
 
 # The gateway's authenticated verdict is an exact final frame:
 #   \n@@deploy-gateway-exit@@ <nonce> <code>\n

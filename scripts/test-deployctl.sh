@@ -176,6 +176,10 @@ unset DEPLOYCTL_RETRY_FIRST_DELAY_SECONDS
 
 DEPLOYCTL_RETRY_FIRST_DELAY_SECONDS=0 bash "$deployctl" fixit-dev version >/dev/null 2>&1; rc=$?
 check "zero retry delay rejected (no busy loop)" 2 "$rc"
+DEPLOYCTL_RETRY_BUDGET_SECONDS=010 bash "$deployctl" fixit-dev version >/dev/null 2>&1; rc=$?
+check "leading-zero (octal) retry budget rejected" 2 "$rc"
+DEPLOYCTL_RETRY_FIRST_DELAY_SECONDS=61 bash "$deployctl" fixit-dev version >/dev/null 2>&1; rc=$?
+check "first retry delay above the 60 s cap rejected" 2 "$rc"
 
 out=$(ACTIONS_ID_TOKEN_REQUEST_URL="http://127.0.0.1:$port/token?api-version=2.0" ACTIONS_ID_TOKEN_REQUEST_TOKEN=reqtok \
   bash "$deployctl" fixit-dev whoauth 2>&1); rc=$?

@@ -180,8 +180,10 @@ mint_oidc_header() {
 retry_budget=${DEPLOYCTL_RETRY_BUDGET_SECONDS:-600}
 delay=${DEPLOYCTL_RETRY_FIRST_DELAY_SECONDS:-5}
 # A zero or non-numeric delay would retry a busy gateway forever: refuse it.
-[[ $retry_budget =~ ^[0-9]{1,5}$ && $delay =~ ^[1-9][0-9]{0,3}$ ]] || {
-  echo "deployctl: DEPLOYCTL_RETRY_BUDGET_SECONDS must be 0-99999 and DEPLOYCTL_RETRY_FIRST_DELAY_SECONDS 1-9999" >&2
+# Decimal without leading zeros (bash arithmetic reads 010 as octal); the first
+# delay obeys the same 60 s cap as the backoff.
+[[ $retry_budget =~ ^(0|[1-9][0-9]{0,4})$ && $delay =~ ^([1-9]|[1-5][0-9]|60)$ ]] || {
+  echo "deployctl: DEPLOYCTL_RETRY_BUDGET_SECONDS must be 0-99999 and DEPLOYCTL_RETRY_FIRST_DELAY_SECONDS 1-60 (decimal, no leading zeros)" >&2
   exit 2
 }
 waited=0

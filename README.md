@@ -175,6 +175,21 @@ Never blindly retry an unknown-state step — inspect the target first
 authenticated with a per-request nonce, so dispatcher output cannot forge a
 verdict. Tests: `scripts/test-deployctl.sh`.
 
+A gateway **HTTP 429** (target busy or gateway at capacity) is refused before
+anything runs, so `deployctl` retries it by itself: 5 s doubling to 60 s, within
+`DEPLOYCTL_RETRY_BUDGET_SECONDS` (default 600). Past the budget it exits **75**
+(nothing ran; safe to re-run).
+
+**OIDC.** A deploy job granted `permissions: id-token: write` sends its GitHub
+Actions OIDC token (audience `deploy-gateway`) on every request. A target
+whose gateway policy binds claims (environment, ref, workflow) verifies it:
+observe mode only audits it, enforce mode refuses a job without a matching
+token. Without the permission no token is sent. This covers jobs that run
+`deployctl` directly (Reservine's `deploy-client`). The reusable
+`.github/workflows/deploy.yml` does **not** request `id-token: write` yet: a
+called workflow asking for a permission its caller did not grant fails to
+start, so that lane opts in together with its callers in a later change.
+
 Registry credentials never touch a workflow: put this run's job token in
 `GHCR_TOKEN` (`${{ secrets.GITHUB_TOKEN }}`, `packages: read`) and any verb
 that makes the host pull (`pull`, `deploy`) authenticates first by itself —

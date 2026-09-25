@@ -16,10 +16,24 @@ import hashlib, sys
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 class H(BaseHTTPRequestHandler):
+    seen = {}
+    def do_GET(self):
+        # The GitHub Actions OIDC mint endpoint (ACTIONS_ID_TOKEN_REQUEST_URL).
+        ok = self.headers.get("Authorization") == "bearer reqtok" and "audience=deploy-gateway" in self.path
+        self.send_response(200 if ok else 401)
+        self.end_headers()
+        if ok:
+            self.wfile.write(b'{"count":1,"value":"aaa.bbb.ccc"}')
     def do_POST(self):
         length = int(self.headers.get("Content-Length", 0))
         body = self.rfile.read(length)
         nonce = self.headers.get("X-Exit-Nonce", "")
+        H.seen[self.path] = H.seen.get(self.path, 0) + 1
+        if "alwaysbusy" in self.path or ("busy" in self.path and H.seen[self.path] <= 2):
+            self.send_response(429)
+            self.end_headers()
+            self.wfile.write(b"concurrency limit: target busy\n")
+            return
         self.send_response(200)
         self.send_header("Content-Type", "text/plain")
         self.end_headers()
@@ -29,6 +43,8 @@ class H(BaseHTTPRequestHandler):
             w.write(f"\n@@deploy-gateway-exit@@ {nonce} 0\n".encode())
             return
         w.write(f"path={self.path}\n".encode())
+        if "whoauth" in self.path:
+            w.write(f"auth={self.headers.get('Authorization', 'none')}\n".encode())
         if body:
             w.write(f"payload sha={hashlib.sha256(body).hexdigest()} bytes={len(body)}\n".encode())
         if "forge" in self.path:
@@ -147,6 +163,37 @@ bash "$deployctl" fixit-dev deploy v1 '@env:bad-name' >/dev/null 2>&1; rc=$?
 check "@env:NAME with an invalid name rejected" 2 "$rc"
 GHCR_TOKEN=x bash "$deployctl" fixit-dev deploy v1 @env:GHCR_TOKEN "@$tmp/payload.env" >/dev/null 2>&1; rc=$?
 check "@env: plus @file rejected" 2 "$rc"
+
+export DEPLOYCTL_RETRY_FIRST_DELAY_SECONDS=1
+out=$(bash "$deployctl" fixit-dev busy 2>&1); rc=$?
+extra=0; [[ $out == *"retrying busy in 1s"* && $out == *"path=/v1/deploy/fixit-dev/busy"* ]] && extra=1
+check "HTTP 429 retried with backoff until admitted" 0 "$rc" "$extra"
+
+out=$(DEPLOYCTL_RETRY_BUDGET_SECONDS=1 bash "$deployctl" fixit-dev alwaysbusy 2>&1); rc=$?
+extra=0; [[ $out == *"still busy"* && $out == *"nothing ran"* ]] && extra=1
+check "HTTP 429 past the retry budget exits 75, nothing ran" 75 "$rc" "$extra"
+unset DEPLOYCTL_RETRY_FIRST_DELAY_SECONDS
+
+DEPLOYCTL_RETRY_FIRST_DELAY_SECONDS=0 bash "$deployctl" fixit-dev version >/dev/null 2>&1; rc=$?
+check "zero retry delay rejected (no busy loop)" 2 "$rc"
+DEPLOYCTL_RETRY_BUDGET_SECONDS=010 bash "$deployctl" fixit-dev version >/dev/null 2>&1; rc=$?
+check "leading-zero (octal) retry budget rejected" 2 "$rc"
+DEPLOYCTL_RETRY_FIRST_DELAY_SECONDS=61 bash "$deployctl" fixit-dev version >/dev/null 2>&1; rc=$?
+check "first retry delay above the 60 s cap rejected" 2 "$rc"
+
+out=$(ACTIONS_ID_TOKEN_REQUEST_URL="http://127.0.0.1:$port/token?api-version=2.0" ACTIONS_ID_TOKEN_REQUEST_TOKEN=reqtok \
+  bash "$deployctl" fixit-dev whoauth 2>&1); rc=$?
+extra=0; [[ $out == *"auth=Bearer aaa.bbb.ccc"* ]] && extra=1
+check "GitHub OIDC token (audience deploy-gateway) sent as Bearer" 0 "$rc" "$extra"
+
+out=$(bash "$deployctl" fixit-dev whoauth 2>&1); rc=$?
+extra=0; [[ $out == *"auth=none"* ]] && extra=1
+check "no id-token permission: no Authorization header" 0 "$rc" "$extra"
+
+out=$(ACTIONS_ID_TOKEN_REQUEST_URL="http://127.0.0.1:$port/token" ACTIONS_ID_TOKEN_REQUEST_TOKEN=wrong \
+  bash "$deployctl" fixit-dev whoauth 2>&1); rc=$?
+extra=0; [[ $out == *"could not mint"* && $out == *"auth=none"* ]] && extra=1
+check "a failed mint warns and calls without a token" 0 "$rc" "$extra"
 
 if (( fails > 0 )); then
   echo "$fails test(s) FAILED"

@@ -28,7 +28,7 @@ runs:
         # connections to become ready" while the daemon itself is healthy, so
         # the attach retries with a linear backoff instead of failing the job
         # on the first hiccup.
-        # NB: no `inspect | head` anywhere here — under the composite's pipefail
+        # NB: no `inspect | head` anywhere here - under the composite's pipefail
         # shell, head closing the pipe early SIGPIPEs inspect and fails the step.
         attempt=1
         until docker buildx inspect "$BK_BUILDER" --bootstrap >/dev/null 2>&1; do

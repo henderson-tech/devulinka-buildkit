@@ -8,18 +8,40 @@ inputs:
   builder:
     description: Builder name.
     default: devulinka-buildkit
+  attempts:
+    description: >
+      How many times to try attaching before failing the job. Each attempt
+      waits attempts * 10 s after a failure (10, 20, 30 ... s).
+    default: "5"
 runs:
   using: composite
   steps:
     - shell: bash
       env:
         BK_BUILDER: ${{ inputs.builder }}
+        BK_ATTEMPTS: ${{ inputs.attempts }}
       run: |
-        docker buildx inspect "$BK_BUILDER" >/dev/null 2>&1 \
-          || docker buildx create --name "$BK_BUILDER" --driver docker-container \
-          || true
+        # The daemon is shared by every lane on the guest. When the guest is
+        # saturated (2026-09-26: load 70 on 32 cpus, three FixIt deploys lost in
+        # one day) `inspect` fails transiently with "listing workers: ... use of
+        # closed network connection" or "DeadlineExceeded ... waiting for
+        # connections to become ready" while the daemon itself is healthy, so
+        # the attach retries with a linear backoff instead of failing the job
+        # on the first hiccup.
+        # NB: no `inspect | head` anywhere here — under the composite's pipefail
+        # shell, head closing the pipe early SIGPIPEs inspect and fails the step.
+        attempt=1
+        until docker buildx inspect "$BK_BUILDER" --bootstrap >/dev/null 2>&1; do
+          docker buildx create --name "$BK_BUILDER" --driver docker-container >/dev/null 2>&1 || true
+          if [ "$attempt" -ge "$BK_ATTEMPTS" ]; then
+            echo "::error::builder $BK_BUILDER not reachable after $BK_ATTEMPTS attempts"
+            docker buildx inspect "$BK_BUILDER" 2>&1 | sed 's/^/  /' || true
+            docker ps -a --filter "name=buildx_buildkit_${BK_BUILDER}" --format '  daemon: {{.Names}} {{.Status}}' || true
+            exit 1
+          fi
+          echo "attach attempt $attempt/$BK_ATTEMPTS failed; retrying in $((attempt * 10))s"
+          sleep $((attempt * 10))
+          attempt=$((attempt + 1))
+        done
         docker buildx use "$BK_BUILDER"
-        # NB: no `inspect | head` here — under the composite's pipefail shell,
-        # head closing the pipe early SIGPIPEs inspect and fails the step.
-        docker buildx inspect "$BK_BUILDER" >/dev/null
-        echo "attached to builder $BK_BUILDER"
+        echo "attached to builder $BK_BUILDER (attempt $attempt)"

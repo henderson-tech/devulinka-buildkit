@@ -30,16 +30,26 @@ runs:
         # on the first hiccup.
         # NB: no `inspect | head` anywhere here - under the composite's pipefail
         # shell, head closing the pipe early SIGPIPEs inspect and fails the step.
+        case "$BK_ATTEMPTS" in
+          ''|*[!0-9]*|0) echo "::error::attempts must be a positive integer, got '$BK_ATTEMPTS'"; exit 2 ;;
+        esac
         attempt=1
-        until docker buildx inspect "$BK_BUILDER" --bootstrap >/dev/null 2>&1; do
-          docker buildx create --name "$BK_BUILDER" --driver docker-container >/dev/null 2>&1 || true
+        while :; do
+          # Capture the failing output: the final failure must show the
+          # bootstrap or connection error that ended the loop, not a second
+          # plain `inspect` run afterwards that may already look healthy.
+          if out=$(docker buildx inspect "$BK_BUILDER" --bootstrap 2>&1); then
+            break
+          fi
+          echo "attach attempt $attempt/$BK_ATTEMPTS failed: $(printf '%s' "$out" | tail -n 1)"
           if [ "$attempt" -ge "$BK_ATTEMPTS" ]; then
             echo "::error::builder $BK_BUILDER not reachable after $BK_ATTEMPTS attempts"
-            docker buildx inspect "$BK_BUILDER" 2>&1 | sed 's/^/  /' || true
+            printf '%s\n' "$out" | sed 's/^/  /'
             docker ps -a --filter "name=buildx_buildkit_${BK_BUILDER}" --format '  daemon: {{.Names}} {{.Status}}' || true
             exit 1
           fi
-          echo "attach attempt $attempt/$BK_ATTEMPTS failed; retrying in $((attempt * 10))s"
+          docker buildx create --name "$BK_BUILDER" --driver docker-container >/dev/null 2>&1 || true
+          echo "retrying in $((attempt * 10))s"
           sleep $((attempt * 10))
           attempt=$((attempt + 1))
         done

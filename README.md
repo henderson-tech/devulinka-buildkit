@@ -113,7 +113,8 @@ capacity; this table describes semantics, not numbers.
   bypasses the pressure gate; only the ungated `small` ignores it entirely.
 - Pressure-gated classes additionally postpone admission (within their timeout)
   while the host is loaded: 1-minute loadavg ≥ `BK_LOAD_MAX` (default 85% of
-  `nproc`) or `MemAvailable` < `BK_MEM_MIN_GB` (default 12 GiB). `--priority`
+  the host's CPUs, `nproc --all`: plain `nproc` honours the lane quota the
+  runner exports as `OMP_NUM_THREADS`) or `MemAvailable` < `BK_MEM_MIN_GB` (default 12 GiB). `--priority`
   bypasses the gate. `/proc/loadavg` and `/proc/meminfo` are not namespaced, so
   a runner container reads the *host's* numbers — which is the point.
 - Locks are plain `flock(2)` files at `/var/lock/devulinka/build-<slot>.lock`.

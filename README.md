@@ -113,7 +113,8 @@ capacity; this table describes semantics, not numbers.
   bypasses the pressure gate; only the ungated `small` ignores it entirely.
 - Pressure-gated classes additionally postpone admission (within their timeout)
   while the host is loaded: 1-minute loadavg ≥ `BK_LOAD_MAX` (default 85% of
-  `nproc`) or `MemAvailable` < `BK_MEM_MIN_GB` (default 12 GiB). `--priority`
+  the host's CPUs, `nproc --all`: plain `nproc` honours the lane quota the
+  runner exports as `OMP_NUM_THREADS`) or `MemAvailable` < `BK_MEM_MIN_GB` (default 12 GiB). `--priority`
   bypasses the gate. `/proc/loadavg` and `/proc/meminfo` are not namespaced, so
   a runner container reads the *host's* numbers — which is the point.
 - Locks are plain `flock(2)` files at `/var/lock/devulinka/build-<slot>.lock`.
@@ -233,7 +234,7 @@ Decision log:
 | `actions/build-lock-acquire/`, `actions/build-lock-release/` | hold a slot across steps (background holder, 6 h failsafe) |
 | `actions/attach-builder/` | attach the job to the shared BuildKit daemon |
 | `actions/deploy-step/` | single deploy verb through the gateway (à la carte v2) |
-| `scripts/bk-lock.sh` | the semaphore itself — everything above is a wrapper |
+| `scripts/bk-lock.sh`, `scripts/test-bk-lock.sh` | the semaphore itself — everything above is a wrapper — and its pressure-gate test |
 | `scripts/deployctl.sh`, `scripts/test-deployctl.sh` | the deploy-gateway client and its test suite |
 | `classes.conf` | slot capacity, the single source of truth |
 | `blueprint/new-project.sh` | onboarding generator (below) |
@@ -241,8 +242,8 @@ Decision log:
 ## Development
 
 There is no build and no dependency install here — the repo is YAML plus a
-handful of Bash scripts (`scripts/bk-lock.sh`, `scripts/deployctl.sh` with
-`scripts/test-deployctl.sh` as its test suite, `blueprint/new-project.sh`).
+handful of Bash scripts (`scripts/bk-lock.sh` with `scripts/test-bk-lock.sh`,
+`scripts/deployctl.sh` with `scripts/test-deployctl.sh`, `blueprint/new-project.sh`).
 Everything else is validated by the consumers that call it, so keep changes
 small and watch the first consuming run.
 

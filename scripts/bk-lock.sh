@@ -38,7 +38,7 @@
 # E2E storm look identical to the semaphore. Before a normal request in a
 # gated class (pressure_gate=1 in classes.conf) may even try for a slot,
 # host pressure must be acceptable:
-#   1-min loadavg < BK_LOAD_MAX   (default 85% of nproc)
+#   1-min loadavg < BK_LOAD_MAX   (default 85% of the host's CPUs, nproc --all)
 #   MemAvailable  >= BK_MEM_MIN_GB (default 12 GiB)
 # Otherwise the request postpones (within its normal --timeout). --priority
 # requests (deploy-critical) BYPASS the gate — a deploy must never wait on
@@ -113,7 +113,11 @@ emit() { # emit <event> <slot> <extra-json-fields>
 pressure_ok() {
   local load cores maxload memavail_kb
   load=$(cut -d' ' -f1 /proc/loadavg 2>/dev/null) || return 0
-  cores=$(nproc 2>/dev/null) || return 0
+  # The HOST's CPUs, to match the host-wide loadavg. Plain `nproc` honours
+  # OMP_NUM_THREADS, which the ci-kvm controller sets to the lane's vCPU quota
+  # (devulinka-infra #575): a 16-vCPU lane on the 80-vCPU guest then gated at
+  # load 13 and starved every e2e lane. `--all` ignores it.
+  cores=$(nproc --all 2>/dev/null) || return 0
   maxload="${BK_LOAD_MAX:-$(( cores * 85 / 100 ))}"
   awk -v l="$load" -v m="$maxload" 'BEGIN{exit !(l < m)}' || return 1
   memavail_kb=$(awk '/^MemAvailable:/{print $2}' /proc/meminfo 2>/dev/null) || return 0

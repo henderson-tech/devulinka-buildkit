@@ -234,7 +234,7 @@ Decision log:
 | `actions/build-lock-acquire/`, `actions/build-lock-release/` | hold a slot across steps (background holder, 6 h failsafe) |
 | `actions/attach-builder/` | attach the job to the shared BuildKit daemon |
 | `actions/deploy-step/` | single deploy verb through the gateway (à la carte v2) |
-| `scripts/bk-lock.sh` | the semaphore itself — everything above is a wrapper |
+| `scripts/bk-lock.sh`, `scripts/test-bk-lock.sh` | the semaphore itself — everything above is a wrapper — and its pressure-gate test |
 | `scripts/deployctl.sh`, `scripts/test-deployctl.sh` | the deploy-gateway client and its test suite |
 | `classes.conf` | slot capacity, the single source of truth |
 | `blueprint/new-project.sh` | onboarding generator (below) |
@@ -242,8 +242,8 @@ Decision log:
 ## Development
 
 There is no build and no dependency install here — the repo is YAML plus a
-handful of Bash scripts (`scripts/bk-lock.sh`, `scripts/deployctl.sh` with
-`scripts/test-deployctl.sh` as its test suite, `blueprint/new-project.sh`).
+handful of Bash scripts (`scripts/bk-lock.sh` with `scripts/test-bk-lock.sh`,
+`scripts/deployctl.sh` with `scripts/test-deployctl.sh`, `blueprint/new-project.sh`).
 Everything else is validated by the consumers that call it, so keep changes
 small and watch the first consuming run.
 

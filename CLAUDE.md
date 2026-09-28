@@ -30,6 +30,7 @@
 
 There is no dependency install and no lint here. Local checks: `bash -n` /
 `shellcheck` on the shell scripts, plus `scripts/test-deployctl.sh` — the
-deploy-lane test suite, which `.github/workflows/ci.yml` also runs. Anything
+deploy-lane test suite — and `scripts/test-bk-lock.sh` (the pressure gate;
+Linux only), both of which `.github/workflows/ci.yml` also runs. Anything
 deeper requires an actual consumer job on a Devulinka runner. Do not invent a `bun`/`npm` command for this repo — it has no
 package manifest.

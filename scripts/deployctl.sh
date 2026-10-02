@@ -131,10 +131,17 @@ urlencode() {
 }
 
 query=''
+arg_index=0
 for arg in ${args[@]+"${args[@]}"}; do
   [[ -z $arg ]] && continue
-  [[ $arg =~ ^[A-Za-z0-9._/@:=+-]{1,128}$ ]] || { echo "deployctl: invalid arg '$arg'" >&2; exit 2; }
+  if [[ ! $arg =~ ^[A-Za-z0-9._/@:=+-]{1,128}$ ]]; then
+    [[ $arg =~ ^[A-Za-z0-9][A-Za-z0-9-]{0,38}\[bot\]$ &&
+      ( ( $verb == registry-login && $arg_index == 0 ) ||
+        ( $verb =~ ^(deploy|release-login|release-prepare-be|release-prepare-fe)$ && $arg_index == 1 ) ) ]] \
+      || { echo "deployctl: invalid arg '$arg'" >&2; exit 2; }
+  fi
   query+="${query:+&}arg=$(urlencode "$arg")"
+  arg_index=$((arg_index + 1))
 done
 
 # Per-request nonce: the gateway echoes it on the status line, so a line the

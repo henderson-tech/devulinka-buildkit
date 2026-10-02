@@ -148,10 +148,12 @@ extra=0; [[ $out == *'arg=release-app%5Bbot%5D&arg=10&arg='* ]] && extra=1
 check "paired prepare: bot actor is admitted in the actor position" 0 "$rc" "$extra"
 bash "$deployctl" fixit-dev pull 'release-app[bot]' >/dev/null 2>&1; rc=$?
 check "bot syntax cannot widen an ordinary argument" 2 "$rc"
-bash "$deployctl" fixit-dev release-prepare-fe 'release-app[bot]' >/dev/null 2>&1; rc=$?
-check "bot syntax cannot replace a release ID" 2 "$rc"
-bash "$deployctl" fixit-dev registry-login 'release-app[b?]' >/dev/null 2>&1; rc=$?
-check "arbitrary bracket patterns remain rejected" 2 "$rc"
+out=$(GHCR_TOKEN=ghs_secret bash "$deployctl" fixit-dev release-prepare-fe 'release-app[bot]' octocat @env:GHCR_TOKEN 2>&1); rc=$?
+extra=0; [[ $out == *"invalid arg 'release-app[bot]'"* ]] && extra=1
+check "bot syntax cannot replace a release ID" 2 "$rc" "$extra"
+out=$(GHCR_TOKEN=ghs_secret bash "$deployctl" fixit-dev registry-login 'release-app[b?]' 2>&1); rc=$?
+extra=0; [[ $out == *"invalid arg 'release-app[b?]'"* ]] && extra=1
+check "arbitrary bracket patterns remain rejected" 2 "$rc" "$extra"
 env -u GHCR_TOKEN -u GITHUB_TOKEN bash "$deployctl" fixit-dev registry-login octocat >/dev/null 2>&1; rc=$?
 check "registry-login without a token or @file rejected" 2 "$rc"
 out=$(GHCR_TOKEN=ghs_secret GITHUB_ACTOR=octocat bash "$deployctl" fixit-dev pull 101 2>&1); rc=$?

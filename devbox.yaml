@@ -1,0 +1,11 @@
+project: devulinka-buildkit
+resources: {test: small, memory: 2G}
+
+apps:
+  repo:
+    source_only: true
+    sync: .
+    sync_ignores: [".env", ".env.*", ".worktrees", "*.pem", "*.key"]
+
+scripts:
+  test-deployctl: {cmd: "bash scripts/test-deployctl.sh", up: false}

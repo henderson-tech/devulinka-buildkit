@@ -7,15 +7,16 @@ name: External Watchdog
 #
 # Monitoring stool:
 #   1. Alertmanager on the devops box — everything while that box is up
-#   2. prod-VPS cron watchdog        — pages when the devops box goes dark
+#   2. dead-man on a third box       — pages when the devops box goes dark
 #   3. THIS workflow (GitHub infra)  — pages when both are dark (provider-
 #      level outage). Detection latency ~10-25 min due to schedule jitter;
 #      fine for this catastrophic-only tier.
 #
 # Secrets: TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID (repo secrets).
-# Variables: WATCHDOG_DEVOPS_IP, WATCHDOG_PROD_IP (repo variables) — the
-# expected A-record IPs, kept out of the public file so the repo doesn't
-# hand out the org→infra mapping for free.
+# Targets are public DNS names, never pinned IPs: a box migration repoints
+# DNS, and an IP pinned in a repo variable went stale at the 2026-08-26
+# Devulinka move — every run red and every page false for seven weeks.
+# Following DNS keeps this on whichever box serves the name.
 
 on:
   schedule:
@@ -33,23 +34,15 @@ jobs:
         env:
           TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
-          DEVOPS_IP: ${{ vars.WATCHDOG_DEVOPS_IP }}
-          PROD_IP: ${{ vars.WATCHDOG_PROD_IP }}
         run: |
           set -uo pipefail
-          if [ -z "$DEVOPS_IP" ] || [ -z "$PROD_IP" ]; then
-            echo "::error::WATCHDOG_DEVOPS_IP / WATCHDOG_PROD_IP repo variables not set"
-            exit 1
-          fi
-          check() { # check <name> <url> [resolve] -> 0 up / 1 down (2 attempts)
-            local name=$1 url=$2 resolve=${3:-}
-            local args=(-fsS -m 12 -o /dev/null)
-            [ -n "$resolve" ] && args+=(--resolve "$resolve")
-            for i in 1 2; do
-              curl "${args[@]}" "$url" && return 0
+          check() { # check <name> <url> -> 0 up / 1 down (2 attempts)
+            local name=$1 url=$2
+            for _ in 1 2; do
+              curl -fsS -m 12 -o /dev/null "$url" && return 0
               sleep 10
             done
-            echo "DOWN: $name ($url)"
+            echo "::error::DOWN: $name ($url)"
             return 1
           }
 
@@ -57,16 +50,16 @@ jobs:
           # status.fixit.app is the PUBLIC prod status page on the devops box.
           # (status.fixit.dev.lovinka.com is WireGuard-gated since 2026-07-29 —
           # it 403s GitHub runners by design; never probe it from here.)
-          check devops-public https://status.fixit.app/ "status.fixit.app:443:${DEVOPS_IP}" \
-            || failures="$failures devops(${DEVOPS_IP})"
-          check prod-public https://api.fixit.app/api/v1/health "api.fixit.app:443:${PROD_IP}" \
-            || failures="$failures prod(${PROD_IP})"
+          check devops-public https://status.fixit.app/ \
+            || failures="$failures devops(status.fixit.app)"
+          check prod-public https://api.fixit.app/api/v1/health \
+            || failures="$failures prod(api.fixit.app)"
 
           if [ -n "$failures" ]; then
             curl -fsS -m 15 -o /dev/null \
               "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
               -d chat_id="${TG_CHAT}" \
-              -d text="🚨🚨 EXTERNAL watchdog (GitHub Actions): unreachable from the public internet:${failures}. If the devops box is in the list, Alertmanager AND the prod cron watchdog may be dead too — possible provider-level outage." \
+              -d text="🚨🚨 EXTERNAL watchdog (GitHub Actions): unreachable from the public internet:${failures}. If the devops box is in the list, Alertmanager AND the in-estate dead-man may be dead too — possible provider-level outage." \
               || echo "::error::telegram send failed"
             exit 1
           fi

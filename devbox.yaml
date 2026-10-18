@@ -1,11 +1,10 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/henderson-tech/devbox-schema/main/v2/devbox.schema.json
+version: 2
 project: devulinka-buildkit
 resources: {test: small, memory: 2G}
-
-apps:
+checkouts:
   repo:
-    source_only: true
-    sync: .
+    from: .
     sync_ignores: [".env", ".env.*", ".worktrees", "*.pem", "*.key"]
-
 scripts:
-  test-deployctl: {cmd: "bash scripts/test-deployctl.sh", up: false}
+  test-deployctl: {cmd: ["bash scripts/test-deployctl.sh"]}

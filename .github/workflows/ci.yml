@@ -3,9 +3,14 @@ name: ci
 # Guards the deploy lane's client: deployctl's validation, payload framing,
 # nonce authentication and unknown-state semantics regress silently without
 # this — the suite is self-contained (bash + python3 stub gateway), so it
-# runs on GitHub-hosted runners; no self-hosted capacity involved. The bk-lock
-# suite rides along: its pressure gate starves every gated class when it reads
-# the lane's CPU quota instead of the host's.
+# needs no Docker socket and no secret. The bk-lock suite rides along: its
+# pressure gate starves every gated class when it reads the lane's CPU quota
+# instead of the host's.
+#
+# It runs on the org's own ephemeral buildkit-ci lane (one container per job,
+# no Docker socket). This repo is public, so a pull request from a fork never
+# reaches that runner: its job is skipped, and a maintainer pushes the branch
+# here to test it.
 
 on:
   pull_request:
@@ -17,8 +22,8 @@ permissions:
 
 jobs:
   deployctl-tests:
-    if: github.event_name != 'pull_request' || !contains(github.event.pull_request.labels.*.name, 'skip-ci')
-    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && !contains(github.event.pull_request.labels.*.name, 'skip-ci'))
+    runs-on: [self-hosted, buildkit-ci]
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v5

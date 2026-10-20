@@ -93,7 +93,7 @@ cat <<EOF
     uses: henderson-tech/devulinka-buildkit/.github/workflows/test-bun.yml@v1
     with:
       runs-on: '["self-hosted","${NAME}-ci"]'
-      bun-version: '1.3.9'
+      bun-version: '1.4.3'
       run: |
         bun run test
         bun run build

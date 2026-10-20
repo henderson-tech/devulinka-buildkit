@@ -52,7 +52,7 @@ jobs:
     with:
       runs-on: '["self-hosted","deployik-ci"]'
       working-directory: web
-      bun-version: '1.3.9'    # keep in sync with your packageManager field
+      bun-version: '1.4.3'    # keep in sync with your packageManager field
       clean: false            # keep node_modules / .next/cache / *.tsbuildinfo warm
                               # (branch/tag jobs only — PR jobs ALWAYS clean, the
                               # input is deliberately ignored there for isolation)

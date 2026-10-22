@@ -63,8 +63,9 @@ jobs:
 ```
 
 Also takes `ref`, `install` (default true), `frozen-lockfile` (default true) and
-`timeout-minutes` (default 30). Note this lane does **not** take a slot — wrap
-the expensive part yourself if it deserves one.
+`timeout-minutes` (per install and run step, not the job: default 30, max 150;
+the job keeps a 350-minute backstop so PR cleanup always runs). Note this lane
+does **not** take a slot — wrap the expensive part yourself if it deserves one.
 
 **Take a slot around your own steps.** Single command:
 
@@ -137,7 +138,7 @@ their warm workdirs, so a workflow can target its lane label for cache affinity
 or a size label alone. Sizes bound one container; slot classes bound the host.
 
 Tier definitions live in the private infra repo
-(`lovinka-devops-infra/apps/gh-runner/docker-compose.yml`).
+(`devulinka-infra/apps/gh-runner/docker-compose.yml`).
 
 ## Deploying (v2)
 
@@ -191,9 +192,10 @@ token. Without the permission no token is sent. This covers jobs that run
 called workflow asking for a permission its caller did not grant fails to
 start, so that lane opts in together with its callers in a later change.
 
-Registry credentials never touch a workflow: put this run's job token in
-`GHCR_TOKEN` (`${{ secrets.GITHUB_TOKEN }}`, `packages: read`) and any verb
-that makes the host pull (`pull`, `deploy`) authenticates first by itself —
+A workflow never stages a registry credential itself: put this run's job token
+in `GHCR_TOKEN` (`${{ secrets.GITHUB_TOKEN }}`, `packages: read`) and any verb
+that makes the host pull (`pull`, `deploy`, when given no explicit payload)
+authenticates first by itself —
 `deployctl <target> registry-login [actor]` is the explicit form (actor
 defaults to `GITHUB_ACTOR`; an `@token-file` is still accepted). The token
 passes through a 0600 temp file deployctl owns and removes. Dispatchers whose
@@ -207,15 +209,15 @@ is accepted only for loopback test stubs. `scripts/deploy-whoami.sh` shares the
 same transport contract, so identity probes cannot silently downgrade.
 Decision log:
 `docs/specs/2026-08-14-buildkit-v2-security-decisions.md`. Server side:
-`lovinka-devops-infra/apps/deploy-gateway/` (gateway) +
-`lovinka-infra/scripts/lovinka-ssh/` (dispatcher framework).
+`devulinka-infra/apps/deploy-gateway/` (gateway) +
+`produlinka-infra/scripts/lovinka-ssh/` (dispatcher framework).
 
 ## Runner requirements
 
 - A Devulinka self-hosted runner: DooD (host `/var/run/docker.sock` mounted) and
   `/var/lock` bind-mounted read-write.
 - The shared builder must exist on the host — created idempotently by
-  `lovinka-devops-infra/scripts/create-devulinka-builder.sh`. `attach-builder`
+  `devulinka-infra/scripts/create-devulinka-builder.sh`. `attach-builder`
   only re-creates the client-side handle (buildx metadata does not survive a
   runner restart); the daemon container and its cache live on the host.
 - Linux only: `bk-lock.sh` needs `flock(1)` and exits 2 with a clear message
@@ -223,21 +225,19 @@ Decision log:
 
 ## Repository map
 
-| Path | What |
-|---|---|
-| `.github/workflows/build-image.yml` | reusable image build (login → attach builder → locked `buildx build` → optional size guard) |
-| `.github/workflows/test-bun.yml` | reusable Bun install + run lane |
-| `.github/workflows/deploy.yml` | reusable v2 deploy lane — prepare + plan of verbs through the host deploy-gateway (no SSH keys in GitHub) |
-| `.github/workflows/ci.yml` | this repo's own checks |
-| `.github/workflows/external-watchdog.yml` | this repo's own cron job, not part of the kit — a GitHub-hosted dead-man's switch that probes the fleet from outside and pages via Telegram. Must stay on `ubuntu-latest`: a self-hosted runner would die with the box it watches. |
-| `actions/build-lock/` | run one command holding a slot |
-| `actions/build-lock-acquire/`, `actions/build-lock-release/` | hold a slot across steps (background holder, 6 h failsafe) |
-| `actions/attach-builder/` | attach the job to the shared BuildKit daemon |
-| `actions/deploy-step/` | single deploy verb through the gateway (à la carte v2) |
-| `scripts/bk-lock.sh`, `scripts/test-bk-lock.sh` | the semaphore itself — everything above is a wrapper — and its pressure-gate test |
-| `scripts/deployctl.sh`, `scripts/test-deployctl.sh` | the deploy-gateway client and its test suite |
-| `classes.conf` | slot capacity, the single source of truth |
-| `blueprint/new-project.sh` | onboarding generator (below) |
+- Consumer entry points: the reusable workflows in `.github/workflows/`
+  (`build-image.yml`, `test-bun.yml`, `deploy.yml`) and the composite actions in
+  `actions/`. `build-lock-acquire` / `build-lock-release` hold a slot across
+  steps (background holder, 6 h failsafe).
+- `scripts/bk-lock.sh` is the semaphore itself — every lock action wraps it —
+  and `classes.conf` is its slot capacity, the single source of truth.
+- `scripts/deployctl.sh` is the deploy-gateway client.
+- This repo's own jobs, not part of the kit: `.github/workflows/ci.yml` (both
+  test suites) and `.github/workflows/external-watchdog.yml`, a GitHub-hosted
+  dead-man's switch that probes the fleet from outside and pages via Telegram.
+  The watchdog must stay on `ubuntu-latest`: a self-hosted runner would die with
+  the box it watches.
+- `blueprint/new-project.sh` is the onboarding generator (below).
 
 ## Development
 
@@ -265,10 +265,12 @@ change capacity.
 blueprint/new-project.sh <owner>/<repo> <shortname> [--go] [--priority]
 ```
 
-Prints three blocks to stdout: the runner service for the private infra repo's
-`gh-runner` compose (GitHub App auth, no PAT), a starter `ci.yml` wired to this
+Prints three blocks to stdout: the lane entry for the private infra repo's
+`etc/ci-lanes/manifest.json` (its `scripts/gen-ci-lanes.py` renders the runner
+compose from it; never hand-edit the compose), a starter `ci.yml` wired to this
 kit, and the manual steps that remain (install the runner GitHub App on the
-repo, deploy the runner stack). Review the generated `ci.yml` before committing
+repo — GitHub App auth, no PAT — then add the lane entry and deploy the fleet).
+Review the generated `ci.yml` before committing
 it — in particular, decide deliberately whether its `pull_request` lanes should
 run on the shared self-hosted box for a public repo.
 
@@ -279,11 +281,11 @@ to `@v2`; everything else moves `v1`.
 
 - `main` is protected by a ruleset: pull requests only, no force-push, no
   deletion, one approving review **from the code owner** (`.github/CODEOWNERS`),
-  and stale reviews are dismissed on push. Merge, squash and rebase are all
-  allowed.
-- Branch naming follows `work/<slug>` (e.g. `work/ci-speed`). (Some older
-  branches used `feat/<slug>`; new work sticks to `work/`.)
+  and stale reviews are dismissed on push. Only merge commits are allowed
+  (squash and rebase are disabled).
+- Branch naming follows `work/<slug>` (e.g. `work/ci-speed`).
 - Conventional Commits, scoped to the piece you touched: `feat(classes):`,
   `feat(bk-lock):`, `docs+blueprint:`.
 - This is public and consumed cross-owner. Never add a secret, an internal
-  hostname, or a private mesh address; keep credentials in the consuming repo.
+  hostname, a WireGuard/mesh address, or an SSH endpoint — not even in a comment
+  or an example; keep credentials in the consuming repo's Actions secrets.

@@ -1,6 +1,11 @@
 # CLAUDE.md
 
-@README.md
+Reusable GitHub Actions workflows, composite actions and Bash scripts for jobs
+on Devulinka self-hosted runners: the host-global admission queue
+(`classes.conf` + `scripts/bk-lock.sh`), the shared BuildKit builder, the Bun
+test lane and the v2 deploy lane (`scripts/deployctl.sh`). README.md is the
+consumer manual (purpose, inputs, outputs, exit codes, runbooks): read it before
+changing anything a consumer calls.
 
 ## Constraints that are not visible in the code
 
@@ -13,6 +18,8 @@
   That force-push is sanctioned for the MAJOR TAG only (the standard moving-tag
   release for actions) — never for branches — and only from a green `main`.
   Say so when you finish a change; do not move the tag without being asked.
+- README.md, verbatim: "**Versioning:** consumers pin `@v1`, a moving major
+  tag. Breaking changes bump to `@v2`; everything else moves `v1`."
 - **Capacity lives in `classes.conf` only.** Editing slot counts anywhere else
   is a bug. `scripts/bk-lock.sh` also carries a `BUILTIN_CLASSES` fallback for
   an unreadable config — keep it in sync when you change capacity.
@@ -26,11 +33,46 @@
   Branch as `work/<slug>`, Conventional Commits scoped to the component
   (`feat(bk-lock):`, `feat(classes):`).
 
+## Consumer contracts to keep (detail in README.md)
+
+- Admission: `priority: true` / `--priority` is for deploy-critical builds
+  only. Waiting past `--timeout` exits 75; queue telemetry is best-effort and
+  never fails a build. The Bun lane takes no slot: consumers wrap the expensive
+  part themselves.
+- `test-bun.yml`: `clean: false` applies to branch/tag jobs only; PR jobs ALWAYS
+  clean (the input is deliberately ignored there for isolation).
+- Deploy lane: no SSH keys in GitHub, ever. Repo identity comes from the
+  runner's guest lease, not from anything the job claims; targets are logical
+  names, and where they point is estate configuration, not workflow text.
+- Deploy exit 70 = state UNKNOWN: never blindly retry an unknown-state step,
+  inspect the target first. A gateway HTTP 429 is refused before anything runs;
+  `deployctl` retries it within `DEPLOYCTL_RETRY_BUDGET_SECONDS`, then exits 75
+  (nothing ran; safe to re-run).
+- The reusable `deploy.yml` does not request `id-token: write` yet: a called
+  workflow asking for a permission its caller did not grant fails to start, so
+  it opts in together with its callers.
+- A workflow never stages the registry token: `deployctl` owns the 0600 temp
+  file and removes it (`GHCR_TOKEN` in the env, or `@env:GHCR_TOKEN` via
+  `deploy-step`'s `payload-env`).
+- Every non-loopback gateway request uses TLS with the public-key hash pinned in
+  `scripts/deploy-gateway-curl.sh`; cleartext only for loopback test stubs.
+  `scripts/deploy-whoami.sh` shares that transport, so identity probes cannot
+  silently downgrade.
+- `.github/workflows/external-watchdog.yml` is this repo's own cron, not part
+  of the kit, and must stay on `ubuntu-latest`: a self-hosted runner would die
+  with the box it watches.
+- `blueprint/new-project.sh`: review the generated `ci.yml` before committing
+  it, and decide deliberately whether its `pull_request` lanes should run on
+  the shared self-hosted box for a public repo.
+
 ## Verifying a change
 
-There is no dependency install and no lint here. Local checks: `bash -n` /
-`shellcheck` on the shell scripts, plus `scripts/test-deployctl.sh` — the
-deploy-lane test suite — and `scripts/test-bk-lock.sh` (the pressure gate;
-Linux only), both of which `.github/workflows/ci.yml` also runs. Anything
-deeper requires an actual consumer job on a Devulinka runner. Do not invent a `bun`/`npm` command for this repo — it has no
-package manifest.
+There is no dependency install and no package-manager lint target here. Local
+checks: `bash -n` / `shellcheck` on the shell scripts, plus
+`scripts/test-deployctl.sh` — the deploy-lane test suite — and
+`scripts/test-bk-lock.sh` (the pressure gate; Linux only), both of which
+`.github/workflows/ci.yml` also runs. That job skips fork PRs (push the branch
+here to test) and PRs labelled `skip-ci`; a skipped job is not a pass. Anything
+deeper requires an actual consumer job on a Devulinka runner: keep changes small
+and watch the first consuming run. Do not invent a `bun`/`npm` command for this
+repo — it has no package manifest.

@@ -20,8 +20,9 @@ changing anything a consumer calls.
   Say so when you finish a change; do not move the tag without being asked.
 - README.md, verbatim: "**Versioning:** consumers pin `@v1`, a moving major
   tag. Breaking changes bump to `@v2`; everything else moves `v1`."
-- **Capacity lives in `classes.conf` only.** Editing slot counts anywhere else
-  is a bug. `scripts/bk-lock.sh` also carries a `BUILTIN_CLASSES` fallback for
+- **Capacity lives in `classes.conf` only.** Slot names and counts live ONLY
+  there; editing them anywhere else is a bug (README describes semantics, not
+  numbers). `scripts/bk-lock.sh` also carries a `BUILTIN_CLASSES` fallback for
   an unreadable config — keep it in sync when you change capacity.
 - Every consuming job runs on a self-hosted host with DooD (host docker.sock)
   and a shared `/var/lock`. Treat anything that lands in a `run:` block as
@@ -30,6 +31,9 @@ changing anything a consumer calls.
 - Locks are only ever released by the process exiting — never add stale-lock
   cleanup, and never let a wrapper outlive the work it guards.
 - `main` is ruleset-protected: PR + owner review, no direct push, no force-push.
+  The ruleset also forbids deleting `main`, requires one approving review from
+  the code owner (`.github/CODEOWNERS`) and dismisses stale reviews on push.
+  Repo settings allow only merge commits (squash and rebase are disabled).
   Branch as `work/<slug>`, Conventional Commits scoped to the component
   (`feat(bk-lock):`, `feat(classes):`).
 
@@ -38,16 +42,19 @@ changing anything a consumer calls.
 - Admission: `priority: true` / `--priority` is for deploy-critical builds
   only. Waiting past `--timeout` exits 75; queue telemetry is best-effort and
   never fails a build. The Bun lane takes no slot: consumers wrap the expensive
-  part themselves.
+  part themselves. The pressure gate reads the host's `/proc/loadavg` and
+  `/proc/meminfo` on purpose (they are not namespaced).
 - `test-bun.yml`: `clean: false` applies to branch/tag jobs only; PR jobs ALWAYS
-  clean (the input is deliberately ignored there for isolation).
+  clean (the input is deliberately ignored there for isolation). `bun-version`
+  is kept in sync with the consuming repo's `packageManager` field.
 - Deploy lane: no SSH keys in GitHub, ever. Repo identity comes from the
   runner's guest lease, not from anything the job claims; targets are logical
   names, and where they point is estate configuration, not workflow text.
 - Deploy exit 70 = state UNKNOWN: never blindly retry an unknown-state step,
-  inspect the target first. A gateway HTTP 429 is refused before anything runs;
-  `deployctl` retries it within `DEPLOYCTL_RETRY_BUDGET_SECONDS`, then exits 75
-  (nothing ran; safe to re-run).
+  inspect the target first. The status line is authenticated with a
+  per-request nonce, so dispatcher output cannot forge a verdict. A gateway
+  HTTP 429 is refused before anything runs; `deployctl` retries it within
+  `DEPLOYCTL_RETRY_BUDGET_SECONDS`, then exits 75 (nothing ran; safe to re-run).
 - The reusable `deploy.yml` does not request `id-token: write` yet: a called
   workflow asking for a permission its caller did not grant fails to start, so
   it opts in together with its callers.
@@ -61,9 +68,12 @@ changing anything a consumer calls.
 - `.github/workflows/external-watchdog.yml` is this repo's own cron, not part
   of the kit, and must stay on `ubuntu-latest`: a self-hosted runner would die
   with the box it watches.
-- `blueprint/new-project.sh`: review the generated `ci.yml` before committing
-  it, and decide deliberately whether its `pull_request` lanes should run on
-  the shared self-hosted box for a public repo.
+- `blueprint/new-project.sh`: the runner lane is an entry in the private infra
+  repo's `etc/ci-lanes/manifest.json`, rendered by its `scripts/gen-ci-lanes.py`
+  (never hand-edit the compose); runner auth is the GitHub App, no PAT. Review
+  the generated `ci.yml` before committing it, and decide deliberately whether
+  its `pull_request` lanes should run on the shared self-hosted box for a
+  public repo.
 
 ## Verifying a change
 

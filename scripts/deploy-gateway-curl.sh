@@ -18,6 +18,7 @@ fi
 deploy_gateway_url=${DEPLOY_GATEWAY_URL:-}
 readonly deploy_gateway_spki='sha256//jPu2mrBRf7Xw0N2KEcfknu81CiaLVLuvQutQEUl/KzM='
 deploy_gateway_curl_args=()
+readonly deploy_gateway_loopback_re='^http://(127\.0\.0\.1|localhost):[0-9]{1,5}$'
 
 case "$deploy_gateway_url" in
   '')
@@ -25,7 +26,13 @@ case "$deploy_gateway_url" in
     return 78
     ;;
   http://127.0.0.1:*|http://localhost:*)
-    # Hermetic local tests only. A non-loopback cleartext endpoint is refused.
+    # Hermetic local tests only. A non-loopback cleartext endpoint is refused,
+    # and so is anything past an exact loopback host and numeric port:
+    # http://localhost:80@host names host, with "localhost:80" as userinfo.
+    if [[ ! $deploy_gateway_url =~ $deploy_gateway_loopback_re ]]; then
+      echo "deploy-gateway: refusing unauthenticated endpoint: $deploy_gateway_url" >&2
+      return 78
+    fi
     ;;
   https://*)
     deploy_gateway_curl_args=(

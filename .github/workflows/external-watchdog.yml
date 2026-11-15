@@ -1,6 +1,6 @@
 name: External Watchdog
 
-# External dead-man's switch for the Lovinka fleet. Lives in THIS public repo
+# External dead-man's switch for the production fleet. Lives in THIS public repo
 # because GitHub-hosted minutes are free here; the infra repos are private
 # with a hard Actions budget. MUST stay on GitHub-hosted runners — a
 # self-hosted runner would die with the box it is meant to watch.
@@ -48,7 +48,7 @@ jobs:
 
           failures=""
           # status.fixit.app is the PUBLIC prod status page on the devops box.
-          # (status.fixit.dev.lovinka.com is WireGuard-gated since 2026-07-29 —
+          # (the internal dev status page is WireGuard-gated since 2026-07-29 —
           # it 403s GitHub runners by design; never probe it from here.)
           check devops-public https://status.fixit.app/ \
             || failures="$failures devops(status.fixit.app)"

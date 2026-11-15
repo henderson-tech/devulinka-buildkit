@@ -1,7 +1,7 @@
 # devulinka-buildkit
 
 Reusable GitHub Actions workflows and composite actions for projects that build
-on **Devulinka**, the self-hosted CI box behind the FixIt / lovinka products.
+on **Devulinka**, the self-hosted CI box behind the FixIt products.
 Consumers get a shared persistent BuildKit daemon (so base layers are cached
 once for every project, with no `cache-from`/`cache-to` choreography), warm Bun
 installs from a shared runner volume, and — the part GitHub cannot give you — a
@@ -137,7 +137,7 @@ their warm workdirs, so a workflow can target its lane label for cache affinity
 or a size label alone. Sizes bound one container; slot classes bound the host.
 
 Tier definitions live in the private infra repo
-(`lovinka-devops-infra/apps/gh-runner/docker-compose.yml`).
+(`devulinka-infra/apps/gh-runner/docker-compose.yml`).
 
 ## Deploying (v2)
 
@@ -197,8 +197,14 @@ that makes the host pull (`pull`, `deploy`) authenticates first by itself —
 `deployctl <target> registry-login [actor]` is the explicit form (actor
 defaults to `GITHUB_ACTOR`; an `@token-file` is still accepted). The token
 passes through a 0600 temp file deployctl owns and removes. Dispatchers whose
-`deploy` verb takes the token as its payload (Voke, Deployik) get the same
+`deploy` verb takes the token as its payload (Deployik, for one) get the same
 hygiene from `@env:GHCR_TOKEN` — `deploy-step`'s `payload-env` input.
+
+**Gateway endpoint.** Where the gateway listens is estate configuration, so
+this repo never names it: every client reads `DEPLOY_GATEWAY_URL`
+(`https://host:port`) from the bastion runner's environment, and `deploy.yml`
+and `deploy-step` take an optional `gateway-url` input that overrides it.
+With neither set, the client refuses with exit **78** before any request.
 
 À la carte: `actions/deploy-step@v2` (single verb) or
 `scripts/deployctl.sh` directly. Every non-loopback request uses TLS with the
@@ -207,15 +213,15 @@ is accepted only for loopback test stubs. `scripts/deploy-whoami.sh` shares the
 same transport contract, so identity probes cannot silently downgrade.
 Decision log:
 `docs/specs/2026-08-14-buildkit-v2-security-decisions.md`. Server side:
-`lovinka-devops-infra/apps/deploy-gateway/` (gateway) +
-`lovinka-infra/scripts/lovinka-ssh/` (dispatcher framework).
+`devulinka-infra/apps/deploy-gateway/` (gateway) +
+the forced-command dispatcher framework in the private infra repos.
 
 ## Runner requirements
 
 - A Devulinka self-hosted runner: DooD (host `/var/run/docker.sock` mounted) and
   `/var/lock` bind-mounted read-write.
 - The shared builder must exist on the host — created idempotently by
-  `lovinka-devops-infra/scripts/create-devulinka-builder.sh`. `attach-builder`
+  `devulinka-infra/scripts/create-devulinka-builder.sh`. `attach-builder`
   only re-creates the client-side handle (buildx metadata does not survive a
   runner restart); the daemon container and its cache live on the host.
 - Linux only: `bk-lock.sh` needs `flock(1)` and exits 2 with a clear message

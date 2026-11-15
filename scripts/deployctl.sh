@@ -7,7 +7,7 @@
 #   deployctl <target> <verb> [args...] [@payload-file]
 #
 # A trailing @file streams that file as the payload: its byte count and
-# sha256 are appended as the final two protocol args (the lovinka-ssh
+# sha256 are appended as the final two protocol args (the forced-command
 # dispatcher framing) and the bytes ride the request body. @env:NAME streams
 # the value of environment variable NAME instead — for secret payloads (a
 # dispatcher whose `deploy` verb takes the registry token as its payload),

@@ -125,8 +125,18 @@ bash "$deployctl" fixit-dev pull 'v1 --evil' >/dev/null 2>&1; rc=$?
 check "space in arg rejected" 2 "$rc"
 bash "$deployctl" 'Fixit;Prod' version >/dev/null 2>&1; rc=$?
 check "bad target rejected" 2 "$rc"
-DEPLOY_GATEWAY_URL=http://192.168.251.1:8791 bash "$deployctl" fixit-dev version >/dev/null 2>&1; rc=$?
+DEPLOY_GATEWAY_URL=http://10.0.0.1:8791 bash "$deployctl" fixit-dev version >/dev/null 2>&1; rc=$?
 check "non-loopback cleartext gateway rejected" 78 "$rc"
+for spoof in "http://localhost:$port@example.com" "http://127.0.0.1:$port@example.com" \
+  "http://127.0.0.1:$port/" "http://localhost:$port#x" "http://127.0.0.1:${port}x"; do
+  DEPLOY_GATEWAY_URL=$spoof bash "$deployctl" fixit-dev version >/dev/null 2>&1; rc=$?
+  check "cleartext loopback lookalike rejected: $spoof" 78 "$rc"
+done
+out=$(env -u DEPLOY_GATEWAY_URL bash "$deployctl" fixit-dev version 2>&1); rc=$?
+extra=0; [[ $out == *"DEPLOY_GATEWAY_URL is unset"* ]] && extra=1
+check "unset gateway endpoint refused (no built-in default)" 78 "$rc" "$extra"
+DEPLOY_GATEWAY_URL='' bash "$here/deploy-whoami.sh" >/dev/null 2>&1; rc=$?
+check "whoami refuses an empty gateway endpoint" 78 "$rc"
 bash "$deployctl" fixit-dev pull '@a' '@b' >/dev/null 2>&1; rc=$?
 check "second payload rejected" 2 "$rc"
 ln -s /etc/hosts "$tmp/link"

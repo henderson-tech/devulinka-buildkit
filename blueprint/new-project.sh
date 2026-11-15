@@ -5,7 +5,7 @@
 #   blueprint/new-project.sh <owner>/<repo> <shortname> [--go] [--priority]
 #
 #   <shortname>   used for the runner label (<shortname>-ci), container name,
-#                 and workdir. Keep it short and kebab-case, e.g. "voke".
+#                 and workdir. Keep it short and kebab-case, e.g. "acme".
 #   --go          also emit a go-test job (Go + Bun repo).
 #   --priority    builds use the priority lane (deploy-critical projects only).
 #
@@ -45,7 +45,7 @@ cat <<EOF
    "mem": "4g",
    "cpu_shares": 2048,
    "pids": null,
-   "image": "lovinka/gh-runner:dev-vps",
+   "image": "<runner image of the existing hot lanes>",
    "cache_env": {
     "BUN_INSTALL_CACHE_DIR": "/home/runner/.bun/install/cache",
     "PLAYWRIGHT_BROWSERS_PATH": "/home/runner/.cache/ms-playwright"
@@ -118,7 +118,8 @@ cat <<EOF
 #  b. Add block 1 to devulinka-infra etc/ci-lanes/manifest.json, run
 #     scripts/gen-ci-lanes.py, commit manifest + rendered files, merge, then
 #     deploy the fleet:
-#     ssh root@95.216.27.220 /opt/apps/firefly-vm/scripts/deploy-firefly-fleet.sh
+#     apps/firefly-vm/scripts/deploy-firefly-fleet.sh on the Devulinka host (how to
+#     reach it: devulinka-infra apps/firefly-vm/README.md)
 #  c. Drop block 2 into ${SLUG}/.github/workflows/ci.yml, adjust test/build cmds
 #  d. Verify: https://github.com/${SLUG}/settings/actions/runners shows the runner
 #  e. A deploy lane later? That is an ephemeral KVM entry ("ephemeral" array in

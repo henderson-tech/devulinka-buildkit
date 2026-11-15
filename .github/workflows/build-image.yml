@@ -7,7 +7,7 @@ name: bk / build-image
 #       uses: henderson-tech/devulinka-buildkit/.github/workflows/build-image.yml@v1
 #       with:
 #         runs-on: '["self-hosted","deployik-ci"]'
-#         image: ghcr.io/lefteq/lovinka-deployik
+#         image: ghcr.io/<owner>/<name>
 #         dockerfile: docker/Dockerfile
 #         priority: true
 #

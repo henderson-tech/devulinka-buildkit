@@ -27,7 +27,9 @@ inputs:
     required: false
     default: ''
   gateway-url:
-    description: Override the gateway endpoint (tests only)
+    description: >-
+      Gateway endpoint (https://host:port). Empty = the runner's own
+      DEPLOY_GATEWAY_URL, which a bastion runner carries.
     required: false
     default: ''
 runs:
@@ -38,8 +40,10 @@ runs:
       # Inputs reach the script as environment variables only — never by
       # template interpolation into the script source, so a value containing
       # quotes or $(...) is data, not shell.
+      # The input rides its own name: binding DEPLOY_GATEWAY_URL here would
+      # blank the runner's value whenever the input is empty.
       env:
-        DEPLOY_GATEWAY_URL: ${{ inputs.gateway-url }}
+        GATEWAY_URL_INPUT: ${{ inputs.gateway-url }}
         STEP_TARGET: ${{ inputs.target }}
         STEP_VERB: ${{ inputs.verb }}
         STEP_ARGS: ${{ inputs.args }}
@@ -47,7 +51,7 @@ runs:
         STEP_PAYLOAD_ENV: ${{ inputs.payload-env }}
       run: |
         set -euo pipefail
-        [[ -n "${DEPLOY_GATEWAY_URL:-}" ]] || unset DEPLOY_GATEWAY_URL
+        if [[ -n "$GATEWAY_URL_INPUT" ]]; then export DEPLOY_GATEWAY_URL="$GATEWAY_URL_INPUT"; fi
         extra=()
         if [[ -n "$STEP_PAYLOAD_FILE" && -n "$STEP_PAYLOAD_ENV" ]]; then
           echo "deploy-step: payload-file and payload-env are mutually exclusive" >&2

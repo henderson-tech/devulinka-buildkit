@@ -70,6 +70,11 @@ on:
         required: false
         type: number
         default: 30
+      gateway-url:
+        description: Gateway endpoint (https://host:port). Empty = the bastion runner's own DEPLOY_GATEWAY_URL.
+        required: false
+        type: string
+        default: ''
 
 # The job runs caller-provided prepare code with the secrets context in
 # reach — keep the ambient token as weak as possible. packages:read stays
@@ -104,8 +109,16 @@ jobs:
       # deploy-whoami.sh sources deploy-gateway-curl.sh: HTTPS with the
       # gateway's pinned SPKI (the gateway is TLS-only since 2026-08-19; a
       # cleartext curl gets HTTP 400 before any deploy step).
+      # The endpoint is the runner's DEPLOY_GATEWAY_URL unless gateway-url
+      # names one; the input rides its own name so an empty one never blanks
+      # the runner's value.
       - name: Verify gateway identity
-        run: bash .buildkit-v2/scripts/deploy-whoami.sh
+        env:
+          GATEWAY_URL_INPUT: ${{ inputs.gateway-url }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$GATEWAY_URL_INPUT" ]]; then export DEPLOY_GATEWAY_URL="$GATEWAY_URL_INPUT"; fi
+          bash .buildkit-v2/scripts/deploy-whoami.sh
 
       - name: Prepare payloads
         if: inputs.prepare != ''
@@ -123,8 +136,10 @@ jobs:
         env:
           DEPLOY_TARGET: ${{ inputs.target }}
           DEPLOY_PLAN: ${{ inputs.plan }}
+          GATEWAY_URL_INPUT: ${{ inputs.gateway-url }}
         run: |
           set -euo pipefail
+          if [[ -n "$GATEWAY_URL_INPUT" ]]; then export DEPLOY_GATEWAY_URL="$GATEWAY_URL_INPUT"; fi
           while IFS= read -r line; do
             line="${line#"${line%%[![:space:]]*}"}"
             [[ -z $line || $line == \#* ]] && continue
